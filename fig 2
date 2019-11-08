@@ -200,7 +200,7 @@ for(i in 2:length(data)){
 	tr.fs <- tr.fs[!is.na(tr.fs)]
 	head(tr.fs)
 	
-	divergence <- as.numeric(lyap_k(tr.fs, m = 3, d = 2, k = 1, ref = 200, t = Theiler.window, s = 100, eps = sd(tr.fs)/10))
+	divergence <- as.numeric(lyap_k(tr.fs, m = 3, d = 2, k = 1, ref = 200, t = 10, s = 100, eps = sd(tr.fs)/10))
 	
 	d <- data.frame(time=t, div=divergence[1:length(t)])
 	#nrow(d)
