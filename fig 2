@@ -187,9 +187,6 @@ head(data)
 
 
 #Calculate divergences
-diverg <- matrix(NA, 40, length(data))
-
-colnames(diverg) <- c("time", "diverg_n", "time_2", "diverg_n_2", "diverg_n_3", "diverg_n_4", "diverg_n_5")
 
 diverg <- data.frame(time = seq(1,60), n = data$n[1:60])
 
