@@ -1,0 +1,231 @@
+# Code to generate Fig. 2, examining the effects of sampling frequency on LE estimates for three discrete maps.
+          
+library(dplyr)   
+library(tseriesChaos)
+library(cowplot)
+library(ggplot2)
+
+# Create functions for the three maps
+
+logistic <- function(r,n) r*n*(1-n)
+get.iterate.logistic <- function(r,n0,tt){
+  rez <- numeric(length=tt)
+  rez[1] <- n0
+  ### iterate tt times
+  for(i in 2:tt)
+    rez[i] <- logistic(r,rez[i-1])
+  rez
+}
+
+ricker <- function(r_r,n_r) n_r*exp(r_r*(1-n_r))
+get.iterate.ricker <- function(r_r,n0_r,tt_r){
+  rez <- numeric(length= tt_r)
+  rez[1] <- n0_r
+  ### iterate tt times
+  for(i in 2:tt_r)
+    rez[i] <- ricker(r_r,rez[i-1])
+  rez
+}
+
+plot(get.iterate.ricker(3,2,100), type = "l")
+
+
+beetle <- function(L0, P0, A0, tt_b){
+	
+	rez <- matrix(NA, tt_b, 3)
+	rez[1,] <- c(L0, P0, A0)
+	
+	for(i in 2:tt_b){
+		
+	rez[i,1] <- 6.598*rez[(i-1),3]*exp(-1.209e-2*rez[(i-1),1] - 1.155e-2*rez[(i-1),3]) 	#Parameters from Costantino et al. 1997.
+	rez[i,2] <- rez[(i-1),1]*(1-0.2055)
+	rez[i,3] <- rez[(i-1),2]*exp(-0.35*rez[(i-1),3]) + rez[(i-1),3]*(1-0.96)
+	
+	}
+	
+	return(rez)
+}
+
+
+# Now create time series, resample them, and calculate LEs
+
+# Logistic parameters
+r <- 4
+n0 <- 0.4
+tt <- 10000
+
+
+# Create time series, and resample every 2, 3, 4, and 5 time steps.
+
+data <- data.frame(time=seq(1,tt), n=get.iterate.logistic(r=r,n0=n0,tt=tt))
+data_2 <- data %>% slice(seq(1, length(data$n), by = 2))
+data_3 <- data %>% slice(seq(1, length(data$n), by = 3))
+data_4 <- data %>% slice(seq(1, length(data$n), by = 4))
+data_5 <- data %>% slice(seq(1, length(data$n), by = 5))
+
+data <- left_join(data, data_2, by = "time")
+data <- left_join(data, data_3, by = "time")
+data <- left_join(data, data_4, by = "time")
+data <- left_join(data, data_5, by = "time")
+
+
+colnames(data) <- c("time", "n", "n_2", "n_3", "n_4", "n_5")
+head(data)
+
+
+# Calculate LEs using tseriesChaos
+
+diverg <- data.frame(time = seq(1,40), n = data$n[1:40])
+
+for(i in 2:length(data)){
+	
+	t <- seq(1, 40, by = i-1)
+	tr.fs <- data[,i] 
+	tr.fs <- tr.fs[!is.na(tr.fs)]
+	head(tr.fs)
+	
+	divergence <- as.numeric(lyap_k(tr.fs, m = 1, d = 1, k = 1, ref = 1000, t = 10, s = 500, eps = sd(data$n)/10))
+	
+	d <- data.frame(time=t, div=divergence[1:length(t)])
+	tail(d)
+	
+	diverg <- left_join(diverg, d, by = "time")
+	head(diverg)
+	
+}
+
+diverg <- data.frame(diverg)
+colnames(diverg) <- c("time", "n", "diverg_n", "diverg_n_2", "diverg_n_3", "diverg_n_4", "diverg_n_5")
+v <- c( "diverg_n", "diverg_n_2", "diverg_n_3", "diverg_n_4", "diverg_n_5")
+head(diverg)
+
+les <- diverg %>% filter(time < 15) %>% select(-n) %>% tidyr::gather(key = sample, value = divergence, v) %>% group_by(sample) %>% summarize(intercept = coef(lm(divergence ~time))[1], le = coef(lm(divergence ~time))[2]) %>% data.frame()
+
+
+# Make divergence plots.
+
+le_plot_logistic<-ggplot(data = data.frame(log_time_step_over_gt = (c(1,2,3,4,5)), log_le = (les$le)), aes(x= log_time_step_over_gt, y= log_le)) + geom_point(aes(color = as.character(log_time_step_over_gt)), size = 3) + ggtitle("logistic") + xlab("time step/generation time") + ylab("LE")  + theme(legend.title = element_blank(), legend.position = "none", axis.title = element_text(size = 15), axis.text = element_text(size = 12), legend.text = element_text(size = 12))+ scale_color_manual(values = c("black", "blue", "green4", "purple", "orange")) + geom_hline(yintercept = 0.693)
+
+
+diverg_plot_logistic <- 
+diverg %>%  dplyr::select(-n) %>% tidyr::gather(key = sample, value = divergence, v) %>% ggplot(aes(x = time, y = divergence)) + geom_point(aes(color = sample)) + geom_abline(slope = les$le[1], intercept = les$intercept[1], color = "black") + geom_abline(slope = les$le[2], intercept = les$intercept[2], color = "blue") + geom_abline(slope = les$le[3], intercept = les$intercept[3], color = "green4") + geom_abline(slope = les$le[4], intercept = les$intercept[4], color = "purple") + geom_abline(slope = les$le[5], intercept = les$intercept[5], color = "orange")  + ggtitle("logistic") + theme(legend.title = element_blank(), legend.position = "none", axis.title = element_text(size = 15), axis.text = element_text(size = 12), legend.text = element_text(size = 12))+ scale_color_manual(values = c("black", "blue", "green4", "purple", "orange")) + ylab("ln divergence") 
+
+
+# Ricker parameters
+
+r_r <- 3
+n0_r <- 2
+tt_r <- 10000
+
+##create time series, and resample every 2, 3, 4, and 5 time steps.
+data <- data.frame(time=seq(1,tt), n=get.iterate.ricker(r= r_r,n0=n0_r,tt=tt_r))
+data_2 <- data %>% slice(seq(1, length(data$n), by = 2))
+data_3 <- data %>% slice(seq(1, length(data$n), by = 3))
+data_4 <- data %>% slice(seq(1, length(data$n), by = 4))
+data_5 <- data %>% slice(seq(1, length(data$n), by = 5))
+data <- left_join(data, data_2, by = "time")
+data <- left_join(data, data_3, by = "time")
+data <- left_join(data, data_4, by = "time")
+data <- left_join(data, data_5, by = "time")
+
+colnames(data) <- c("time", "n", "n_2", "n_3", "n_4", "n_5")
+head(data)
+
+
+# Calculate LEs
+
+
+diverg <- data.frame(time = seq(1,40), n = data$n[1:40])
+
+for(i in 2:length(data)){
+	
+	t <- seq(1, 40, by = i-1)
+	tr.fs <- data[,i] 
+	tr.fs <- tr.fs[!is.na(tr.fs)]
+	head(tr.fs)
+	
+	divergence <- as.numeric(lyap_k(tr.fs, m = 1, d = 1, k = 1, ref = 1000, t = 10, s = 500, eps = sd(tr.fs)/10))
+	
+	d <- data.frame(time=t, div=divergence[1:length(t)])
+	tail(d)
+	
+	diverg <- left_join(diverg, d, by = "time")
+	head(diverg)
+	
+}
+
+diverg <- data.frame(diverg)
+colnames(diverg) <- c("time", "n", "diverg_n", "diverg_n_2", "diverg_n_3", "diverg_n_4", "diverg_n_5")
+v <- c( "diverg_n", "diverg_n_2", "diverg_n_3", "diverg_n_4", "diverg_n_5")
+head(diverg)
+
+les <- diverg %>% filter(time <= 17) %>% select(-n) %>% tidyr::gather(key = sample, value = divergence, v) %>% group_by(sample) %>% summarize(intercept = coef(lm(divergence ~time))[1], le = coef(lm(divergence ~time))[2]) %>% data.frame()
+les
+
+le_plot_ricker<-ggplot(data = data.frame(log_time_step_over_gt =(c(1,2,3,4,5)), log_le =(les$le)), aes(x= log_time_step_over_gt, y= log_le)) + geom_point(aes(color = as.character(log_time_step_over_gt)), size = 3) + ggtitle("ricker") + xlab("time step/generation time") + ylab("LE")  + theme(legend.title = element_blank(), legend.position = "none", axis.title = element_text(size = 15), axis.text = element_text(size = 12), legend.text = element_text(size = 12))+ scale_color_manual(values = c("black", "blue", "green4", "purple", "orange"))+ geom_hline(yintercept = 0.386)
+
+diverg_plot_ricker <- 
+diverg %>%  dplyr::select(-n) %>% tidyr::gather(key = sample, value = divergence, v) %>% ggplot(aes(x = time, y = divergence)) + geom_point(aes(color = sample))  + geom_abline(slope = les$le[1], intercept = les$intercept[1], color = "black") + geom_abline(slope = les$le[2], intercept = les$intercept[2], color = "blue") + geom_abline(slope = les$le[3], intercept = les$intercept[3], color = "green4") + geom_abline(slope = les$le[4], intercept = les$intercept[4], color = "purple")+ geom_abline(slope = les$le[5], intercept = les$intercept[5], color = "orange") + ggtitle("ricker")  + theme(legend.title = element_blank(), legend.position = "none", axis.title = element_text(size = 15), axis.text = element_text(size = 12), legend.text = element_text(size = 12))+ scale_color_manual(values = c("black", "blue", "green4", "purple", "orange")) + ylab("ln divergence")
+
+
+# Costantino
+
+
+# Create time series, and resample every 2, 3, 4, and 5 time steps.
+data <- data.frame(time=seq(1, 10000), n=beetle(220,0,100, 10000)[,1])
+data_2 <- data %>% slice(seq(1, length(data$n), by = 2))
+data_3 <- data %>% slice(seq(1, length(data$n), by = 3))
+data_4 <- data %>% slice(seq(1, length(data$n), by = 4))
+data_5 <- data %>% slice(seq(1, length(data$n), by = 5))
+data <- left_join(data, data_2, by = "time")
+data <- left_join(data, data_3, by = "time")
+data <- left_join(data, data_4, by = "time")
+data <- left_join(data, data_5, by = "time")
+
+colnames(data) <- c("time", "n", "n_2", "n_3", "n_4", "n_5")
+head(data)
+
+
+#Calculate divergences
+diverg <- matrix(NA, 40, length(data))
+
+colnames(diverg) <- c("time", "diverg_n", "time_2", "diverg_n_2", "diverg_n_3", "diverg_n_4", "diverg_n_5")
+
+diverg <- data.frame(time = seq(1,60), n = data$n[1:60])
+
+for(i in 2:length(data)){
+	
+	t <- seq(1, 60, by = i-1)
+	tr.fs <- data[,i] 
+	tr.fs <- tr.fs[!is.na(tr.fs)]
+	head(tr.fs)
+	
+	divergence <- as.numeric(lyap_k(tr.fs, m = 3, d = 2, k = 1, ref = 200, t = Theiler.window, s = 100, eps = sd(tr.fs)/10))
+	
+	d <- data.frame(time=t, div=divergence[1:length(t)])
+	#nrow(d)
+	
+	diverg <- left_join(diverg, d, by = "time")
+	#nrow(diverg)
+	
+}
+
+diverg <- data.frame(diverg)
+colnames(diverg) <- c("time", "n", "diverg_n", "diverg_n_2", "diverg_n_3", "diverg_n_4", "diverg_n_5")
+v <- c( "diverg_n", "diverg_n_2", "diverg_n_3", "diverg_n_4", "diverg_n_5")
+head(diverg)
+
+les <- diverg %>% dplyr::filter(time < 35) %>% select(-n) %>% tidyr::gather(key = sample, value = divergence, v) %>% group_by(sample) %>% summarize(intercept = coef(lm(divergence ~time))[1], le = coef(lm(divergence ~time))[2]) %>% data.frame()
+les
+
+le_plot_costantino<-ggplot(data = data.frame(log_time_step_over_gt =(c(1,2,3,4,5)), log_le =(les$le)), aes(x= log_time_step_over_gt, y= log_le)) + geom_point(aes(color = as.character(log_time_step_over_gt)), size = 3) + ggtitle("costantino") + xlab("time step/generation time") + ylab("LE")  + theme(legend.title = element_blank(), legend.position = "none", axis.title = element_text(size = 15), axis.text = element_text(size = 12), legend.text = element_text(size = 12))+ scale_color_manual(values = c("black", "blue", "green4", "purple", "orange"))+ geom_hline(yintercept = 0.11)
+
+
+diverg_plot_costantino <- 
+diverg %>%  dplyr::select(-n) %>% tidyr::gather(key = sample, value = divergence, v) %>% ggplot(aes(x = time, y = divergence)) + geom_point(aes(color = sample)) + scale_color_manual(values = c("black", "blue", "green4", "purple", "orange")) + geom_abline(slope = les$le[1], intercept = les$intercept[1], color = "black") + geom_abline(slope = les$le[2], intercept = les$intercept[2], color = "blue") + geom_abline(slope = les$le[3], intercept = les$intercept[3], color = "green4") + geom_abline(slope = les$le[4], intercept = les$intercept[4], color = "purple") + geom_abline(slope = les$le[5], intercept = les$intercept[5], color = "orange") + ggtitle("costantino")  + theme(legend.title = element_blank(), legend.position = "none", axis.title = element_text(size = 15), axis.text = element_text(size = 12), legend.text = element_text(size = 12)) + ylab("ln divergence")
+
+
+
+# Put all of the plots together.
+
+plot_grid(diverg_plot_logistic, diverg_plot_ricker, diverg_plot_costantino,  le_plot_logistic, le_plot_ricker, le_plot_costantino, nrow=2)
